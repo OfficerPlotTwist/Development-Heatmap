@@ -20,3 +20,7 @@ Thumbs.db
 
 # obsolete deterministic-triage cache (replaced by assay)
 kindling_triage.json
+
+# local Windows autostart launcher (machine-specific absolute paths) — never publish
+# the live file lives in the Startup folder, not here; this guards against copies.
+*.vbs
