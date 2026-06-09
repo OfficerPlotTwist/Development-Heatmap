@@ -1,0 +1,7 @@
+{
+  "_comment": "Working directories shown in the tool. On first run, scan_sessions.py auto-detects these from your session history and writes config.json. Edit here or use: python scan_sessions.py --add-root \"C:/path/to/dir\"  /  --remove-root \"...\"  /  --list-roots",
+  "roots": [
+    "C:/Users/you/Documents/Projects",
+    "C:/Users/you/work"
+  ]
+}

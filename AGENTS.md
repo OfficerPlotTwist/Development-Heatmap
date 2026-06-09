@@ -1,10 +1,10 @@
 # AGENTS.md — Development Heatmap
 
-A self-contained HTML viewer that maps your Claude Code session activity across the
-`~/Documents/AI` folder as a heat-graded directory tree, with a per-directory
-session list. This file documents the **harness dependencies** an agent needs that
-are **not present in an out-of-the-box codex / claude-code install**, plus the build
-workflow.
+A self-contained HTML viewer that maps your Claude Code session activity across one
+or more configured working directories as a heat-graded directory tree, with a
+per-directory session list and a kindling backlog. This file documents the **harness
+dependencies** an agent needs that are **not present in an out-of-the-box codex /
+claude-code install**, plus the build workflow.
 
 ## What's here
 
@@ -12,9 +12,42 @@ workflow.
 |------|------|------|
 | `scan_sessions.py` | Walks session logs → `data.json`, `digests.json`, and the HTML | **Python 3 stdlib only** |
 | `summarize.py` | LLM 3-line session descriptions → `summaries.json` (cached) | **`anthropic` + API key** ⚠️ |
+| `triage_kindling.py` | Parses each kindling dir's git history → `kindling_triage.json` | **`git` on PATH** |
 | `template.html` | The viewer app (data injected at build) | — |
 | `session_heatmap.html` | **The deliverable** — self-contained, double-clickable | a browser |
-| `data.json` / `digests.json` / `summaries.json` | build artifacts / cache | — |
+| `config.json` | Working dirs (roots) shown in the tool — auto-detected on first run | — |
+| `data.json` / `digests.json` / `summaries.json` / `kindling_triage.json` / `scan_cache.json` | build artifacts / caches (gitignored) | — |
+
+## Working directories (config)
+
+Roots live in `config.json` (`{"roots":[...]}`, gitignored — has absolute paths;
+`config.example.json` is the template). On first run, `scan_sessions.py` auto-detects
+candidate working dirs from your session history (ranks the 2-deep dirs under `$HOME`
+by session count, excluding `.claude`/`AppData`/`.codex`/cache/temp). Manage them:
+
+```
+python scan_sessions.py --list-roots
+python scan_sessions.py --add-root "C:/path/to/dir"      # also rebuilds
+python scan_sessions.py --remove-root "C:/path/to/dir"
+```
+
+The viewer's header lists the roots and has a `＋ dir` button that (since the page is
+static and can't re-scan) copies the matching `--add-root` command to the clipboard.
+
+## Kindling + triage
+
+`scan_sessions.py` flags two resumable states per session: **limit-hit-unresumed**
+(`isApiErrorMessage` + "session limit", with no activity after the marker) and
+**waiting-for-input** (`wreason`: assistant ended on a question / pending
+AskUserQuestion, or an interrupted tool call). The 🔥 Kindling view lists both,
+oldest→newest, tagged, and warns when a session's directory has newer sessions.
+
+`triage_kindling.py` is the **spin-up-triage** action: for each kindling session it
+runs `git log --since=<session date>` in that directory and counts newer sessions in
+the same dir, producing a stale/fresh verdict (`kindling_triage.json`) the viewer
+merges in. "Stale" = the repo moved on (commits landed or newer sessions ran) since
+the session was abandoned, i.e. it's out of date with the current repo state.
+Deterministic — needs only `git`, no API key.
 
 ## Pipeline
 

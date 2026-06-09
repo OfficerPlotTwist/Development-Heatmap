@@ -5,6 +5,10 @@ digests.json
 summaries.json
 session_heatmap.html
 scan_cache.json
+kindling_triage.json
+
+# local working-dir config (contains absolute paths); ship config.example.json instead
+config.json
 
 # Subagent summarization scratch (partial {id: desc} files, merged into summaries.json)
 parts/

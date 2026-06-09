@@ -31,10 +31,19 @@ summarize.py      ──► summaries.json  (LLM: 3-line description, CACHED by 
 ## Quick start
 
 ```bash
-python scan_sessions.py          # build the viewer from your current session logs
+python scan_sessions.py          # first run auto-detects your working dirs, builds the viewer
 python summarize.py              # (optional) add 3-line descriptions — needs an API key
-python scan_sessions.py          # re-run to merge descriptions in
+python triage_kindling.py        # (optional) flag stale kindling via git history — needs git
+python scan_sessions.py          # re-run to merge descriptions/triage in
 # open session_heatmap.html
+```
+
+Manage which directories are shown:
+
+```bash
+python scan_sessions.py --list-roots
+python scan_sessions.py --add-root "C:/path/to/dir"
+python scan_sessions.py --remove-root "C:/path/to/dir"
 ```
 
 `scan_sessions.py` is **pure Python 3 stdlib** — no install needed. Session

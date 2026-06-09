@@ -208,6 +208,14 @@
   .snums .t{font-size:15px; font-weight:600; color:var(--ink)}
   .snums .p{font-size:11px; color:var(--muted); margin-top:3px}
 
+  /* root chips + add-dir affordance in the header */
+  .rootchip{display:inline-block; color:var(--ink); background:rgba(255,255,255,.05);
+            border:1px solid var(--line); border-radius:5px; padding:0 6px; margin-right:3px}
+  .adddir{background:transparent; color:var(--faint); border:1px dashed var(--rail);
+          border-radius:5px; padding:1px 7px; font-family:var(--mono); font-size:11px;
+          cursor:pointer; transition:.14s}
+  .adddir:hover{color:var(--accent); border-color:var(--accent)}
+
   /* ---------- kindling: limit-hit, unresumed sessions ---------- */
   .kindle{
     display:inline-flex; align-items:center; gap:7px; cursor:pointer;
@@ -234,6 +242,23 @@
   .kresume{display:inline-flex; align-items:center; gap:6px; cursor:pointer;
            color:var(--faint); transition:color .15s}
   .kresume:hover{color:var(--accent)}
+  /* reason tags */
+  .ktag{border-radius:5px; padding:0 7px; font-size:10.5px; letter-spacing:.3px; font-weight:600}
+  .ktag.lim{color:#ff9b6a; background:rgba(230,85,13,.16); border:1px solid rgba(230,85,13,.4)}
+  .ktag.q{color:#7fb6ff; background:rgba(33,113,200,.16); border:1px solid rgba(33,113,200,.4)}
+  .ktag.int{color:#c7b3ff; background:rgba(130,110,255,.14); border:1px solid rgba(130,110,255,.4)}
+  /* newer-in-dir warning + triage verdict */
+  .kwarn{color:#ffcf6b; background:rgba(255,190,80,.12); border:1px solid rgba(255,190,80,.4);
+         border-radius:5px; padding:0 6px}
+  .ktriage{border-radius:5px; padding:0 6px; cursor:help}
+  .ktriage.bad{color:#ff8a8a; background:rgba(255,90,90,.12); border:1px solid rgba(255,90,90,.4)}
+  .ktriage.ok{color:#8ee6a8; background:rgba(80,220,130,.10); border:1px solid rgba(80,220,130,.35)}
+  /* spin-up triage button + counter */
+  .kspin{margin-left:12px; background:transparent; color:var(--accent);
+         border:1px solid rgba(253,141,60,.45); border-radius:999px; padding:3px 11px;
+         font-family:var(--mono); font-size:11px; cursor:pointer; transition:.14s}
+  .kspin:hover{border-color:var(--accent); box-shadow:0 0 14px rgba(253,141,60,.25)}
+  .kdone{margin-left:8px; color:var(--faint); font-size:11px}
 
   ::-webkit-scrollbar{width:11px; height:11px}
   ::-webkit-scrollbar-thumb{background:var(--line); border-radius:6px; border:3px solid var(--bg0)}
@@ -245,7 +270,10 @@
 <header>
   <div class="titlebar">
     <h1>Development <em>Heatmap</em></h1>
-    <div class="sub">AI folder telemetry<br><span id="root"></span></div>
+    <div class="sub">development telemetry<br>
+      <span id="roots"></span>
+      <button class="adddir" id="adddir" title="Include another working directory in the map">＋ dir</button>
+    </div>
     <div class="live">
       <div><span class="big" id="liveCount"></span> sessions in view</div>
       <div id="liveTotals"></div>
@@ -299,7 +327,14 @@
 const DATA = JSON.parse(document.getElementById('payload').textContent);
 const $ = s => document.querySelector(s);
 
-$('#root').textContent = DATA.ai_root;
+$('#roots').innerHTML = (DATA.roots||[]).map(r=>`<span class="rootchip" title="${r}">${r.split('/').pop()}</span>`).join(' ');
+$('#adddir').onclick=()=>{
+  const p=prompt('Add a working directory to include (absolute path):');
+  if(!p) return;
+  const cmd='python scan_sessions.py --add-root "'+p.replace(/"/g,'')+'"';
+  navigator.clipboard?.writeText(cmd);
+  alert('Copied this command — run it in the Development-Heatmap folder, then reload the page:\n\n'+cmd);
+};
 $('#src').textContent = `source: ${DATA.count} sessions · ${DATA.min_date} → ${DATA.max_date}`;
 
 let metric = 'tokens';
@@ -332,7 +367,7 @@ const fmtVal=n=> metric==='tokens'? fmtTok(n) : n.toLocaleString();
 // ---- tree build (only dirs with >=1 session in range) --------------------
 const newNode=(name,path)=>({name,path,children:new Map(),tok:0,prm:0,count:0});
 function buildTree(sessions){
-  const root=newNode('AI','');
+  const root=newNode('all','');
   for(const s of sessions){
     root.tok+=s.tokens; root.prm+=s.prompts; root.count++;
     let n=root,path='';
@@ -489,8 +524,11 @@ function renderDetail(path){
   const lo=logs.length?Math.min(...logs):0, hi=logs.length?Math.max(...logs):1;
   const heatFor=v=>{const t=v<=0?0:(hi>lo?(Math.log10(v+1)-lo)/(hi-lo):1);const c=heatRGB(t);return `rgb(${c[0]},${c[1]},${c[2]})`;};
 
-  const name=segs.length?segs[segs.length-1]:'AI root';
-  const full=path?`${DATA.ai_root}/${path}`:DATA.ai_root;
+  const name=segs.length?segs[segs.length-1]:'all roots';
+  const rootPath=segs.length?(DATA.root_paths&&DATA.root_paths[segs[0]]||''):'';
+  const full=segs.length
+    ? rootPath+(segs.length>1?'/'+segs.slice(1).join('/'):'')
+    : (DATA.roots||[]).join('   ·   ');
 
   const rows=list.map((s,i)=>{
     const deep=s.segs.slice(segs.length).join('/');
@@ -534,38 +572,64 @@ function renderDetail(path){
 }
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
-// ---- kindling: sessions that hit the limit and were never resumed ---------
-const kindlingList=()=>DATA.sessions.filter(s=>s.limit && !s.resumed)
+// ---- kindling: limit-hit-unresumed OR waiting-for-input -------------------
+const kindlingList=()=>DATA.sessions
+  .filter(s=>(s.limit && !s.resumed) || s.waiting)
   .sort((a,b)=>(a.ts||'').localeCompare(b.ts||''));   // oldest -> newest
+
+// newer sessions in the SAME directory -> the abandoned one may be superseded
+function newerInDir(s){
+  const key=s.segs.join('/');
+  return DATA.sessions.filter(x=>x.segs.join('/')===key && (x.ts||'')>(s.ts||'')).length;
+}
 
 function renderKindling(){
   const list=kindlingList();
   const rows=list.map((s,i)=>{
-    const dir=s.segs.join('/')||'(AI root)';
+    const dir=s.segs.join('/')||'(root)';
     const desc=s.desc||s.title||'';
     const descHtml=desc
       ? `<div class="stitle" title="${esc(s.title||'')}">${esc(desc).replace(/\n/g,'<br>')}</div>`
       : `<div class="stitle none">no description</div>`;
+    const tag = s.limit ? `<span class="ktag lim">⛔ session limit</span>`
+              : s.wreason==='question' ? `<span class="ktag q">💬 awaiting reply</span>`
+              : `<span class="ktag int">⤵ interrupted</span>`;
+    const newer=newerInDir(s);
+    const warn = newer>0
+      ? `<span class="kwarn" title="this directory has ${newer} newer session(s) — work may have moved on without this one">⚠ ${newer} newer in dir</span>` : '';
+    const tri = s.triage
+      ? `<span class="ktriage ${s.triage.stale?'bad':'ok'}" title="${esc(s.triage.detail||'')}">${esc(s.triage.label||'')}</span>` : '';
     return `<div class="scard kcard" style="animation-delay:${Math.min(i*9,260)}ms">
       <div class="sheat"></div>
       <div class="smain">
         ${descHtml}
         <div class="smeta">
+          ${tag}
           <span>${fmtWhen(s.ts)}</span>
           <span class="kdir" data-path="${esc(s.segs.join('/'))}">${esc(dir)}</span>
           ${s.reset?`<span class="kreset">reset ${esc(s.reset)}</span>`:''}
+          ${warn}${tri}
           <span class="kresume" data-id="${esc(s.session)}" title="copy: claude --resume ${esc(s.session)}">⟲ resume</span>
         </div>
       </div>
       <div class="snums"><div class="p">${esc((fmtWhen(s.ts)||'').split(',')[0])}</div></div>
     </div>`;
   }).join('');
+  const triaged=list.filter(s=>s.triage).length;
   $('#detail').innerHTML=
     `<button class="back" id="back">← node map</button>
-     <div class="dhead"><h2>🔥 Kindling</h2><span class="dpath">sessions that hit the session limit and were never resumed · oldest → newest</span></div>
-     <div class="dstats"><b>${list.length}</b> ${list.length===1?'session':'sessions'} waiting to be picked back up</div>
-     <div class="slist">${rows||'<div class="empty">nothing kindling — every limited session was resumed</div>'}</div>`;
+     <div class="dhead"><h2>🔥 Kindling</h2><span class="dpath">limit-hit-unresumed or left waiting for input · oldest → newest</span></div>
+     <div class="dstats"><b>${list.length}</b> ${list.length===1?'session':'sessions'} to pick back up
+       <button class="kspin" id="kspin" title="Parse each kindling directory's git history to flag sessions that are stale / out of date with the current repo">⚙ spin up triage</button>
+       ${triaged?`<span class="kdone">${triaged} triaged</span>`:''}
+     </div>
+     <div class="slist">${rows||'<div class="empty">nothing kindling — nothing limited or left waiting</div>'}</div>`;
   $('#back').onclick=()=>{ location.hash=''; };
+  $('#kspin').onclick=()=>{
+    const cmd='python triage_kindling.py';
+    navigator.clipboard?.writeText(cmd);
+    alert('Copied. Run this in the Development-Heatmap folder to parse dev history and flag stale kindling, then re-run python scan_sessions.py and reload:\n\n'+cmd+'\n\n(needs git on PATH; uses each session’s commits-since + newer-session count to judge staleness.)');
+  };
   $('#detail').querySelectorAll('.kdir').forEach(el=>el.onclick=()=>{ location.hash='#/dir/'+encodeURIComponent(el.dataset.path); });
   $('#detail').querySelectorAll('.kresume').forEach(el=>el.onclick=()=>{
     navigator.clipboard?.writeText('claude --resume '+el.dataset.id);
