@@ -5,7 +5,8 @@ digests.json
 summaries.json
 session_heatmap.html
 scan_cache.json
-kindling_triage.json
+kindling_assay.json
+kindling_assay_input.json
 
 # local working-dir config (contains absolute paths); ship config.example.json instead
 config.json
@@ -16,3 +17,6 @@ parts/
 # OS / editor noise
 .DS_Store
 Thumbs.db
+
+# obsolete deterministic-triage cache (replaced by assay)
+kindling_triage.json

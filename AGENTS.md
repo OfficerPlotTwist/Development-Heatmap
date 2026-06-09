@@ -12,11 +12,11 @@ claude-code install**, plus the build workflow.
 |------|------|------|
 | `scan_sessions.py` | Walks session logs → `data.json`, `digests.json`, and the HTML | **Python 3 stdlib only** |
 | `summarize.py` | LLM 3-line session descriptions → `summaries.json` (cached) | **`anthropic` + API key** ⚠️ |
-| `triage_kindling.py` | Parses each kindling dir's git history → `kindling_triage.json` | **`git` on PATH** |
+| `assay_kindling.py` | Model judges if each kindling item is still useful vs the current dir → `kindling_assay.json` | **LLM** (API key *or* subagents) + `git` |
 | `template.html` | The viewer app (data injected at build) | — |
 | `session_heatmap.html` | **The deliverable** — self-contained, double-clickable | a browser |
 | `config.json` | Working dirs (roots) shown in the tool — auto-detected on first run | — |
-| `data.json` / `digests.json` / `summaries.json` / `kindling_triage.json` / `scan_cache.json` | build artifacts / caches (gitignored) | — |
+| `data.json` / `digests.json` / `summaries.json` / `kindling_assay*.json` / `scan_cache.json` | build artifacts / caches (gitignored) | — |
 
 ## Working directories (config)
 
@@ -34,7 +34,7 @@ python scan_sessions.py --remove-root "C:/path/to/dir"
 The viewer's header lists the roots and has a `＋ dir` button that (since the page is
 static and can't re-scan) copies the matching `--add-root` command to the clipboard.
 
-## Kindling + triage
+## Kindling + assay
 
 `scan_sessions.py` flags two resumable states per session: **limit-hit-unresumed**
 (`isApiErrorMessage` + "session limit", with no activity after the marker) and
@@ -42,12 +42,21 @@ static and can't re-scan) copies the matching `--add-root` command to the clipbo
 AskUserQuestion, or an interrupted tool call). The 🔥 Kindling view lists both,
 oldest→newest, tagged, and warns when a session's directory has newer sessions.
 
-`triage_kindling.py` is the **spin-up-triage** action: for each kindling session it
-runs `git log --since=<session date>` in that directory and counts newer sessions in
-the same dir, producing a stale/fresh verdict (`kindling_triage.json`) the viewer
-merges in. "Stale" = the repo moved on (commits landed or newer sessions ran) since
-the session was abandoned, i.e. it's out of date with the current repo state.
-Deterministic — needs only `git`, no API key.
+**Assay** (`assay_kindling.py`) is the **model** judgment behind the "run assay"
+button: it gathers each kindling session's intent and the CURRENT state of its
+directory (recent `git log`, file tree, newer-session count → `kindling_assay_input.json`),
+then a model decides whether resuming it is still worth doing:
+**useful** (real, unaddressed) / **stale** (partly overtaken) / **obsolete** (done or
+superseded). Verdict + reason → `kindling_assay.json`, merged into the viewer.
+
+This is an **LLM harness dependency** (same as `summarize.py`), satisfiable two ways:
+- **API path:** `pip install anthropic`, set `ANTHROPIC_API_KEY`, run `python assay_kindling.py`
+  (defaults to `claude-sonnet-4-6` for the judgment).
+- **Subagent path (no key):** `python assay_kindling.py --emit` writes
+  `kindling_assay_input.json`; fan out subagents over its key-slices, each writing
+  `{session_id: {verdict, reason}}` to `parts/assay_<n>.json`; merge into
+  `kindling_assay.json`, then re-run `scan_sessions.py`. The git/file context is
+  pre-gathered into the input file, so subagents reason over it without re-inspecting dirs.
 
 ## Pipeline
 

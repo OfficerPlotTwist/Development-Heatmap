@@ -29,7 +29,7 @@ HERE = Path(__file__).resolve().parent
 OUT = HERE / "data.json"
 DIGESTS = HERE / "digests.json"      # per-session gist -> input for summarize.py / subagents
 SUMMARIES = HERE / "summaries.json"  # session_id -> LLM 3-line description (cache)
-TRIAGE = HERE / "kindling_triage.json"  # session_id -> dev-history staleness verdict
+ASSAY = HERE / "kindling_assay.json"  # session_id -> model verdict on whether it's still useful
 CACHE = HERE / "scan_cache.json"     # file -> {mtime,size,rec}: skip re-parsing unchanged logs
 CONFIG = HERE / "config.json"        # {"roots": [...]} working dirs shown in the tool
 TEMPLATE = HERE / "template.html"
@@ -389,7 +389,7 @@ def main():
                 return {}
         return {}
     summaries = load_json(SUMMARIES)
-    triage = load_json(TRIAGE)
+    assay = load_json(ASSAY)
     have = sum(1 for s in sessions if summaries.get(s["session"]))
 
     dates = [s["date"] for s in sessions]
@@ -407,7 +407,7 @@ def main():
              "desc": summaries.get(s["session"]),
              "limit": s.get("limit", False), "reset": s.get("reset"),
              "resumed": s.get("resumed", False), "waiting": s.get("waiting", False),
-             "wreason": s.get("wreason"), "triage": triage.get(s["session"])}
+             "wreason": s.get("wreason"), "assay": assay.get(s["session"])}
             for s in sessions
         ],
     }
@@ -420,7 +420,7 @@ def main():
     print(f"Descriptions: {have}/{len(sessions)} present "
           f"({len(sessions) - have} need summarize.py / subagent pass)")
     print(f"Kindling (limit-unresumed + waiting-for-input): {len(kindling)} "
-          f"[{sum(1 for s in kindling if triage.get(s['session']))} triaged]")
+          f"[{sum(1 for s in kindling if assay.get(s['session']))} assayed]")
     print(f"Wrote {OUT} and {DIGESTS}")
 
     # Embed data into the template -> single self-contained, double-clickable page.

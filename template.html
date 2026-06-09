@@ -250,9 +250,12 @@
   /* newer-in-dir warning + triage verdict */
   .kwarn{color:#ffcf6b; background:rgba(255,190,80,.12); border:1px solid rgba(255,190,80,.4);
          border-radius:5px; padding:0 6px}
-  .ktriage{border-radius:5px; padding:0 6px; cursor:help}
-  .ktriage.bad{color:#ff8a8a; background:rgba(255,90,90,.12); border:1px solid rgba(255,90,90,.4)}
-  .ktriage.ok{color:#8ee6a8; background:rgba(80,220,130,.10); border:1px solid rgba(80,220,130,.35)}
+  /* assay verdict: model judgment on whether it's still worth resuming */
+  .kassay{border-radius:5px; padding:0 7px; cursor:help; font-weight:600; font-size:10.5px; text-transform:uppercase; letter-spacing:.4px}
+  .kassay.useful{color:#8ee6a8; background:rgba(80,220,130,.12); border:1px solid rgba(80,220,130,.45)}
+  .kassay.stale{color:#ffcf6b; background:rgba(255,190,80,.12); border:1px solid rgba(255,190,80,.45)}
+  .kassay.obsolete{color:#ff8a8a; background:rgba(255,90,90,.12); border:1px solid rgba(255,90,90,.4)}
+  .kreason{color:var(--muted); font-style:italic}
   /* spin-up triage button + counter */
   .kspin{margin-left:12px; background:transparent; color:var(--accent);
          border:1px solid rgba(253,141,60,.45); border-radius:999px; padding:3px 11px;
@@ -597,8 +600,10 @@ function renderKindling(){
     const newer=newerInDir(s);
     const warn = newer>0
       ? `<span class="kwarn" title="this directory has ${newer} newer session(s) — work may have moved on without this one">⚠ ${newer} newer in dir</span>` : '';
-    const tri = s.triage
-      ? `<span class="ktriage ${s.triage.stale?'bad':'ok'}" title="${esc(s.triage.detail||'')}">${esc(s.triage.label||'')}</span>` : '';
+    const a=s.assay;
+    const assayHtml = a
+      ? `<span class="kassay ${esc(a.verdict||'stale')}" title="${esc(a.reason||'')}">${esc(a.verdict||'')}</span>`
+        + (a.reason?` <span class="kreason">${esc(a.reason)}</span>`:'') : '';
     return `<div class="scard kcard" style="animation-delay:${Math.min(i*9,260)}ms">
       <div class="sheat"></div>
       <div class="smain">
@@ -608,27 +613,28 @@ function renderKindling(){
           <span>${fmtWhen(s.ts)}</span>
           <span class="kdir" data-path="${esc(s.segs.join('/'))}">${esc(dir)}</span>
           ${s.reset?`<span class="kreset">reset ${esc(s.reset)}</span>`:''}
-          ${warn}${tri}
+          ${warn}${assayHtml}
           <span class="kresume" data-id="${esc(s.session)}" title="copy: claude --resume ${esc(s.session)}">⟲ resume</span>
         </div>
       </div>
       <div class="snums"><div class="p">${esc((fmtWhen(s.ts)||'').split(',')[0])}</div></div>
     </div>`;
   }).join('');
-  const triaged=list.filter(s=>s.triage).length;
+  const assayed=list.filter(s=>s.assay);
+  const useful=assayed.filter(s=>s.assay.verdict==='useful').length;
   $('#detail').innerHTML=
     `<button class="back" id="back">← node map</button>
      <div class="dhead"><h2>🔥 Kindling</h2><span class="dpath">limit-hit-unresumed or left waiting for input · oldest → newest</span></div>
      <div class="dstats"><b>${list.length}</b> ${list.length===1?'session':'sessions'} to pick back up
-       <button class="kspin" id="kspin" title="Parse each kindling directory's git history to flag sessions that are stale / out of date with the current repo">⚙ spin up triage</button>
-       ${triaged?`<span class="kdone">${triaged} triaged</span>`:''}
+       <button class="kspin" id="kspin" title="A model reads each session's intent and the current state of its directory, then judges whether resuming it is still useful">⚗ run assay</button>
+       ${assayed.length?`<span class="kdone">${assayed.length} assayed · ${useful} still useful</span>`:''}
      </div>
      <div class="slist">${rows||'<div class="empty">nothing kindling — nothing limited or left waiting</div>'}</div>`;
   $('#back').onclick=()=>{ location.hash=''; };
   $('#kspin').onclick=()=>{
-    const cmd='python triage_kindling.py';
+    const cmd='python assay_kindling.py';
     navigator.clipboard?.writeText(cmd);
-    alert('Copied. Run this in the Development-Heatmap folder to parse dev history and flag stale kindling, then re-run python scan_sessions.py and reload:\n\n'+cmd+'\n\n(needs git on PATH; uses each session’s commits-since + newer-session count to judge staleness.)');
+    alert('Copied. A model evaluates each kindling session against the current state of its directory and tags it useful / stale / obsolete.\n\nRun in the Development-Heatmap folder, then re-run python scan_sessions.py and reload:\n\n'+cmd+'\n\n(API path needs ANTHROPIC_API_KEY; no key → python assay_kindling.py --emit then the subagent path in AGENTS.md.)');
   };
   $('#detail').querySelectorAll('.kdir').forEach(el=>el.onclick=()=>{ location.hash='#/dir/'+encodeURIComponent(el.dataset.path); });
   $('#detail').querySelectorAll('.kresume').forEach(el=>el.onclick=()=>{

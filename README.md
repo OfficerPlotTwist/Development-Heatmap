@@ -33,8 +33,8 @@ summarize.py      ──► summaries.json  (LLM: 3-line description, CACHED by 
 ```bash
 python scan_sessions.py          # first run auto-detects your working dirs, builds the viewer
 python summarize.py              # (optional) add 3-line descriptions — needs an API key
-python triage_kindling.py        # (optional) flag stale kindling via git history — needs git
-python scan_sessions.py          # re-run to merge descriptions/triage in
+python assay_kindling.py         # (optional) model judges if each kindling item is still useful
+python scan_sessions.py          # re-run to merge descriptions/assay in
 # open session_heatmap.html
 ```
 
