@@ -576,9 +576,11 @@ function renderDetail(path){
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
 // ---- kindling: limit-hit-unresumed OR waiting-for-input -------------------
+// rank by usefulness (obsolete sinks to the bottom), then oldest -> newest
+const kRank=s=>{const v=s.assay&&s.assay.verdict; return v==='useful'?0 : v==='obsolete'?2 : 1;};
 const kindlingList=()=>DATA.sessions
   .filter(s=>(s.limit && !s.resumed) || s.waiting)
-  .sort((a,b)=>(a.ts||'').localeCompare(b.ts||''));   // oldest -> newest
+  .sort((a,b)=> kRank(a)-kRank(b) || (a.ts||'').localeCompare(b.ts||''));
 
 // newer sessions in the SAME directory -> the abandoned one may be superseded
 function newerInDir(s){
