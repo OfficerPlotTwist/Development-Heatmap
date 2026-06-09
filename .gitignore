@@ -1,0 +1,13 @@
+# Generated data — contains personal session summaries, first-prompts, and local
+# absolute paths for 300+ sessions. NEVER publish to a public repo.
+data.json
+digests.json
+summaries.json
+session_heatmap.html
+
+# Subagent summarization scratch (partial {id: desc} files, merged into summaries.json)
+parts/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db

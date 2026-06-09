@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Development Heatmap · AI Folder Telemetry</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg0:#06080d; --bg1:#0a0e16; --bg2:#15233b;
+    --ink:#eef2fb; --muted:#7e8aa6; --faint:#4a5570;
+    --line:#1d2740; --rail:#2c3a5a;
+    --accent:#fd8d3c; --accent-deep:#e6550d;
+    --panel:rgba(16,22,36,.72);
+    --serif:'Instrument Serif',Georgia,serif;
+    --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%}
+  body{
+    background:
+      radial-gradient(120% 85% at 50% -12%, var(--bg2) 0%, var(--bg1) 42%, var(--bg0) 100%);
+    color:var(--ink); font-family:var(--mono); font-weight:400;
+    -webkit-font-smoothing:antialiased; position:relative; overflow-x:hidden;
+  }
+  /* faint engineering grid + grain atmosphere */
+  body::before{
+    content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+    background-image:
+      linear-gradient(rgba(120,140,190,.035) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(120,140,190,.035) 1px,transparent 1px);
+    background-size:44px 44px; mask-image:radial-gradient(120% 90% at 50% 0%,#000 35%,transparent 90%);
+  }
+  body::after{
+    content:""; position:fixed; inset:0; z-index:0; pointer-events:none; opacity:.04;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  }
+  #app{position:relative; z-index:1}
+
+  /* ---------- header / instrument bar ---------- */
+  header{
+    position:sticky; top:0; z-index:20;
+    background:linear-gradient(180deg,rgba(6,8,13,.94),rgba(6,8,13,.6));
+    backdrop-filter:blur(10px); border-bottom:1px solid var(--line);
+    padding:18px 26px 14px;
+  }
+  .titlebar{display:flex; align-items:baseline; gap:16px; flex-wrap:wrap}
+  h1{
+    font-family:var(--serif); font-weight:400; font-size:38px; line-height:.9;
+    margin:0; letter-spacing:.5px;
+  }
+  h1 em{font-style:italic; color:var(--accent)}
+  .sub{color:var(--muted); font-size:11.5px; letter-spacing:.6px}
+  .sub b{color:var(--ink); font-weight:500; font-variant-numeric:tabular-nums}
+  .live{margin-left:auto; text-align:right; color:var(--muted); font-size:11.5px; letter-spacing:.4px}
+  .live b{color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums}
+  .live .big{font-family:var(--serif); font-size:22px; color:var(--accent); letter-spacing:.5px}
+
+  .toolbar{display:flex; align-items:center; gap:22px; flex-wrap:wrap; margin-top:14px}
+  .grp{display:flex; align-items:center; gap:9px}
+  .cap{font-size:10px; letter-spacing:1.4px; text-transform:uppercase; color:var(--faint)}
+  input[type=date]{
+    background:rgba(10,14,22,.85); color:var(--ink); border:1px solid var(--line);
+    border-radius:7px; padding:6px 9px; font-family:var(--mono); font-size:12px;
+    color-scheme:dark; transition:border-color .15s;
+  }
+  input[type=date]:hover{border-color:var(--rail)}
+  input[type=date]:focus{outline:none; border-color:var(--accent)}
+  .seg{display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden}
+  .seg button{
+    background:transparent; color:var(--muted); border:0; padding:6px 14px;
+    font-family:var(--mono); font-size:11.5px; letter-spacing:.4px; cursor:pointer;
+    transition:.14s;
+  }
+  .seg button.on{background:var(--accent); color:#160d04; font-weight:600}
+  .seg button:not(.on):hover{color:var(--ink); background:rgba(255,255,255,.04)}
+  .pills{display:flex; gap:6px}
+  .pills button{
+    background:transparent; color:var(--muted); border:1px solid var(--line);
+    border-radius:999px; padding:5px 12px; font-family:var(--mono); font-size:11px;
+    letter-spacing:.4px; cursor:pointer; transition:.14s;
+  }
+  .pills button:hover{color:var(--ink); border-color:var(--rail)}
+
+  /* ---------- node map ---------- */
+  main{padding:26px 26px 110px}
+  .tree{max-width:900px}
+  .row{position:relative; display:flex; align-items:center; padding:2px 0; margin:0}
+  .tw{
+    flex:0 0 auto; width:16px; text-align:center; color:var(--muted);
+    cursor:pointer; user-select:none; font-size:9px; transition:color .15s,transform .15s;
+  }
+  .tw:hover{color:var(--accent)}
+  .tw.leaf{visibility:hidden}
+
+  .chip{
+    position:relative; display:inline-flex; align-items:center; gap:7px;
+    padding:3px 11px; border-radius:6px; cursor:pointer;
+    border:1px solid rgba(255,255,255,.10);
+    color:#fff; font-size:12.5px; font-weight:500; letter-spacing:.2px;
+    text-shadow:0 1px 3px rgba(0,0,0,.7); white-space:nowrap;
+    animation:rise .32s cubic-bezier(.2,.7,.3,1) both;
+    transition:transform .14s, filter .14s,
+               background-color 1.5s ease, box-shadow 1.5s ease;
+  }
+  .chip:hover{transform:translateX(2px); filter:brightness(1.12)}
+  .chip .dot{ /* leading session-count tick, faint */
+    width:5px; height:5px; border-radius:50%; background:rgba(255,255,255,.55);
+    box-shadow:0 0 6px rgba(255,255,255,.4); flex:0 0 auto;
+  }
+  .chip.root{
+    font-family:var(--serif); font-size:18px; font-weight:400; padding:2px 14px;
+    letter-spacing:.5px;
+  }
+  @keyframes rise{from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:translateY(0)}}
+
+  /* circuit-trace connectors */
+  .kids{position:relative; margin-left:24px; padding-left:30px}
+  .kids::before{ /* vertical rail */
+    content:""; position:absolute; left:0; top:-4px; bottom:14px;
+    border-left:1px solid var(--rail);
+  }
+  .kids > .row::before{ /* horizontal trace to chip */
+    content:""; position:absolute; left:-30px; top:50%; width:24px;
+    border-top:1px solid var(--rail);
+  }
+  .kids > .row::after{ /* junction node on the rail */
+    content:""; position:absolute; left:-32px; top:50%; transform:translateY(-50%);
+    width:4px; height:4px; border-radius:50%; background:var(--rail);
+  }
+
+  /* ---------- key / legend ---------- */
+  footer{
+    position:fixed; left:0; right:0; bottom:0; z-index:20;
+    display:flex; align-items:flex-end; gap:18px; padding:12px 26px;
+    background:linear-gradient(0deg,rgba(6,8,13,.96),rgba(6,8,13,.55));
+    backdrop-filter:blur(10px); border-top:1px solid var(--line);
+  }
+  #src{color:var(--faint); font-size:11px; letter-spacing:.4px}
+  .key{margin-left:auto; display:flex; flex-direction:column; gap:6px; align-items:flex-end}
+  .key .grow{display:grid; grid-template-columns:auto 64px 200px 64px; align-items:center; gap:10px}
+  .key .lbl{font-size:10px; letter-spacing:1.2px; text-transform:uppercase; color:var(--faint); text-align:right}
+  .key .lbl.active{color:var(--accent)}
+  .key .val{font-size:11.5px; font-variant-numeric:tabular-nums; color:var(--ink)}
+  .key .val.lo{text-align:right} .key .val.hi{text-align:left}
+  .grad{height:10px; border-radius:5px; border:1px solid rgba(255,255,255,.08);
+        background:linear-gradient(90deg,
+          rgb(10,32,95),rgb(33,102,200),rgb(120,130,160),rgb(245,150,60),rgb(235,90,20));
+        box-shadow:0 0 14px rgba(253,141,60,.18)}
+  .grad.alt{opacity:.4; box-shadow:none}
+
+  .empty{color:var(--muted); padding:60px; text-align:center; font-style:italic;
+         font-family:var(--serif); font-size:20px}
+
+  /* ---------- detail view (sessions in a directory) ---------- */
+  .detail{max-width:920px}
+  .back{
+    display:inline-flex; align-items:center; gap:7px; cursor:pointer;
+    background:transparent; color:var(--muted); border:1px solid var(--line);
+    border-radius:999px; padding:6px 14px; font-family:var(--mono); font-size:11.5px;
+    letter-spacing:.4px; transition:.15s; margin-bottom:20px;
+  }
+  .back:hover{color:var(--ink); border-color:var(--rail); transform:translateX(-2px)}
+  .dhead{display:flex; align-items:baseline; gap:16px; flex-wrap:wrap; margin-bottom:4px}
+  .dhead h2{font-family:var(--serif); font-weight:400; font-size:32px; margin:0; letter-spacing:.4px}
+  .dpath{font-size:11px; color:var(--faint); letter-spacing:.3px; word-break:break-all}
+  .dstats{color:var(--muted); font-size:12px; margin-top:8px; letter-spacing:.3px}
+  .dstats b{color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums}
+  .sorts{display:flex; gap:6px; margin:20px 0 4px}
+  .sorts button{
+    background:transparent; color:var(--muted); border:1px solid var(--line);
+    border-radius:999px; padding:5px 13px; font-family:var(--mono); font-size:11px;
+    letter-spacing:.4px; cursor:pointer; transition:.14s;
+  }
+  .sorts button.on{color:var(--accent); border-color:var(--accent)}
+  .sorts button:not(.on):hover{color:var(--ink); border-color:var(--rail)}
+
+  .slist{display:flex; flex-direction:column; gap:9px; margin-top:14px}
+  .scard{
+    position:relative; display:grid; grid-template-columns:6px 1fr auto;
+    gap:16px; align-items:center; padding:13px 16px 13px 13px;
+    border:1px solid var(--line); border-radius:11px;
+    background:linear-gradient(180deg,rgba(20,28,45,.55),rgba(12,17,28,.55));
+    animation:rise .3s cubic-bezier(.2,.7,.3,1) both; transition:border-color .15s,transform .15s;
+  }
+  .scard:hover{border-color:var(--rail); transform:translateY(-1px)}
+  .sheat{align-self:stretch; border-radius:4px; min-height:34px}
+  .smain{min-width:0}
+  .stitle{font-size:13px; color:var(--ink); overflow:hidden;
+          display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; line-height:1.42}
+  .stitle.none{color:var(--faint); font-style:italic; font-family:var(--serif); font-size:15px}
+  .smeta{display:flex; gap:14px; align-items:center; margin-top:6px; font-size:11px; color:var(--muted); flex-wrap:wrap}
+  .smeta .badge{color:var(--accent); border:1px solid rgba(253,141,60,.35); border-radius:5px; padding:0 6px}
+  .smeta .sid{color:var(--faint); cursor:pointer; transition:color .15s}
+  .smeta .sid:hover{color:var(--accent)}
+  .snums{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap}
+  .snums .t{font-size:15px; font-weight:600; color:var(--ink)}
+  .snums .p{font-size:11px; color:var(--muted); margin-top:3px}
+
+  ::-webkit-scrollbar{width:11px; height:11px}
+  ::-webkit-scrollbar-thumb{background:var(--line); border-radius:6px; border:3px solid var(--bg0)}
+  ::-webkit-scrollbar-thumb:hover{background:var(--rail)}
+</style>
+</head>
+<body>
+<div id="app">
+<header>
+  <div class="titlebar">
+    <h1>Development <em>Heatmap</em></h1>
+    <div class="sub">AI folder telemetry<br><span id="root"></span></div>
+    <div class="live">
+      <div><span class="big" id="liveCount"></span> sessions in view</div>
+      <div id="liveTotals"></div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="grp">
+      <span class="cap">From</span><input type="date" id="from">
+      <span class="cap">To</span><input type="date" id="to">
+    </div>
+    <div class="pills">
+      <button data-hours="36">36h</button>
+      <button data-days="7">7 days</button>
+      <button data-days="30">30 days</button>
+      <button data-days="all">all time</button>
+    </div>
+    <div class="grp">
+      <span class="cap">Heat</span>
+      <div class="seg" id="metric">
+        <button data-m="tokens" class="on">token spend</button>
+        <button data-m="prompts">user prompts</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="tree" id="tree"></div>
+  <section class="detail" id="detail" hidden></section>
+</main>
+
+<footer id="foot">
+  <span id="src"></span>
+  <div class="key">
+    <div class="grow">
+      <span class="lbl active" id="kl-act">tokens</span>
+      <span class="val lo" id="act-lo"></span>
+      <div class="grad" id="grad-act"></div>
+      <span class="val hi" id="act-hi"></span>
+    </div>
+  </div>
+</footer>
+</div>
+
+<script id="payload" type="application/json">/*__DATA__*/</script>
+<script>
+const DATA = JSON.parse(document.getElementById('payload').textContent);
+const $ = s => document.querySelector(s);
+
+$('#root').textContent = DATA.ai_root;
+$('#src').textContent = `source: ${DATA.count} sessions · ${DATA.min_date} → ${DATA.max_date}`;
+
+let metric = 'tokens';
+const collapsed = new Set();
+let cutoffTs = null;   // sub-day window (e.g. 36h): exact ISO cutoff, else null
+
+// shared window test — day-granular From/To inputs PLUS an optional precise cutoff
+function inWindow(s){
+  const from=$('#from').value, to=$('#to').value;
+  return s.date>=from && s.date<=to && (!cutoffTs || (s.ts && s.ts>=cutoffTs));
+}
+
+// ---- heat: log-normalized blue → orange ----------------------------------
+const STOPS=[[0,[10,32,95]],[.30,[33,102,200]],[.55,[120,130,160]],[.78,[245,150,60]],[1,[235,90,20]]];
+function heatRGB(t){
+  t=Math.max(0,Math.min(1,t));
+  for(let i=1;i<STOPS.length;i++){
+    if(t<=STOPS[i][0]){
+      const [a,ca]=STOPS[i-1],[b,cb]=STOPS[i],f=(t-a)/((b-a)||1);
+      return ca.map((v,j)=>Math.round(v+(cb[j]-v)*f));
+    }
+  }
+  return [235,90,20];
+}
+
+// ---- formatting ----------------------------------------------------------
+const fmtTok=n=> n>=1e9?(n/1e9).toFixed(2)+'B': n>=1e6?(n/1e6).toFixed(1)+'M': n>=1e3?(n/1e3).toFixed(1)+'k': ''+n;
+const fmtVal=n=> metric==='tokens'? fmtTok(n) : n.toLocaleString();
+
+// ---- tree build (only dirs with >=1 session in range) --------------------
+const newNode=(name,path)=>({name,path,children:new Map(),tok:0,prm:0,count:0});
+function buildTree(sessions){
+  const root=newNode('AI','');
+  for(const s of sessions){
+    root.tok+=s.tokens; root.prm+=s.prompts; root.count++;
+    let n=root,path='';
+    for(const seg of s.segs){
+      path=path?path+'/'+seg:seg;
+      if(!n.children.has(seg)) n.children.set(seg,newNode(seg,path));
+      n=n.children.get(seg); n.tok+=s.tokens; n.prm+=s.prompts; n.count++;
+    }
+  }
+  return root;
+}
+const colorVal=n=> metric==='tokens'? n.tok : n.prm;
+function collect(node,out,isRoot){
+  if(!isRoot) out.push(colorVal(node));
+  for(const c of node.children.values()) collect(c,out,false);
+}
+function logNorm(values){
+  const logs=values.filter(v=>v>0).map(v=>Math.log10(v+1));
+  const lo=logs.length?Math.min(...logs):0, hi=logs.length?Math.max(...logs):1;
+  return v=> v<=0?0:(hi>lo?(Math.log10(v+1)-lo)/(hi-lo):1);
+}
+function applyHeat(chip,node,norm){
+  const t=norm(colorVal(node)), [r,g,b]=heatRGB(t);
+  chip.style.background=`rgb(${r},${g},${b})`;
+  // glow scales with heat — hot nodes radiate
+  chip.style.boxShadow=`0 0 ${3+t*22}px rgba(${r},${g},${b},${.25+t*.45}),`
+                     +` inset 0 1px 0 rgba(255,255,255,.10)`;
+}
+function updateKey(acc){
+  const cLo=acc.length?Math.min(...acc):0, cHi=acc.length?Math.max(...acc):0;
+  $('#kl-act').textContent= metric==='tokens'?'token spend':'user prompts';
+  $('#act-lo').textContent=fmtVal(cLo); $('#act-hi').textContent=fmtVal(cHi);
+}
+
+let chipReg=[];   // {chip,node,isRoot} — kept so a metric toggle can recolor in place
+
+// Recolor existing tiles WITHOUT rebuilding the DOM. The layout stays put (it's
+// anchored to token spend), so only background/glow change — and the .chip CSS
+// transition animates that shift over 1.5s, per tile.
+function recolor(){
+  if(!chipReg.length) return;
+  const acc=chipReg.filter(c=>!c.isRoot).map(c=>colorVal(c.node));
+  const norm=logNorm(acc);
+  for(const c of chipReg) applyHeat(c.chip,c.node,norm);
+  updateKey(acc);
+}
+
+function render(){
+  const sessions=DATA.sessions.filter(inWindow);
+  const tree=buildTree(sessions);
+
+  const acc=[]; collect(tree,acc,true);
+  const norm=logNorm(acc);
+
+  // live stats
+  const totTok=sessions.reduce((a,s)=>a+s.tokens,0);
+  const totPr =sessions.reduce((a,s)=>a+s.prompts,0);
+  $('#liveCount').textContent=sessions.length;
+  $('#liveTotals').innerHTML=`<b>${fmtTok(totTok)}</b> tokens · <b>${totPr.toLocaleString()}</b> prompts`;
+  updateKey(acc);
+
+  const host=$('#tree'); host.innerHTML=''; chipReg=[];
+  if(!sessions.length){ host.innerHTML='<div class="empty">no sessions in this range</div>'; return; }
+
+  // Layout is ALWAYS ordered by token spend, so the directory arrangement is
+  // identical in both metrics — toggling only changes color, never position.
+  let order=0;
+  function row(node, container, isRoot){
+    const kids=[...node.children.values()].sort((a,b)=>b.tok-a.tok);
+    const hasKids=kids.length>0, isCol=collapsed.has(node.path);
+
+    const rowEl=document.createElement('div'); rowEl.className='row';
+
+    const tw=document.createElement('span');
+    tw.className='tw'+(hasKids?'':' leaf'); tw.textContent=isCol?'▶':'▼';
+    if(hasKids) tw.onclick=()=>{ isCol?collapsed.delete(node.path):collapsed.add(node.path); render(); };
+    rowEl.appendChild(tw);
+
+    const chip=document.createElement('span');
+    chip.className='chip'+(isRoot?' root':'');
+    applyHeat(chip,node,norm);  // initial color set before insertion -> no first-paint fade
+    chip.style.animationDelay=Math.min(order++*9,260)+'ms';
+    const dot=document.createElement('span'); dot.className='dot'; chip.appendChild(dot);
+    const nm=document.createElement('span'); nm.textContent=node.name; chip.appendChild(nm);
+    chip.title=`${node.path||'AI root'}\n`+
+      `${fmtTok(node.tok)} tokens · ${node.prm.toLocaleString()} prompts · ${node.count} sessions (subtree)`
+      +`\n— click to list sessions`;
+    chip.onclick=()=>{ location.hash='#/dir/'+encodeURIComponent(node.path); };
+    rowEl.appendChild(chip);
+    container.appendChild(rowEl);
+    chipReg.push({chip,node,isRoot});
+
+    if(hasKids && !isCol){
+      const ul=document.createElement('div'); ul.className='kids';
+      for(const k of kids) row(k, ul, false);
+      container.appendChild(ul);
+    }
+  }
+  row(tree, host, true);
+}
+
+// ---- detail view: sessions inside a directory ----------------------------
+let sortBy='recent';
+const SORTS={recent:(a,b)=>(b.ts||'').localeCompare(a.ts||''),
+             tokens:(a,b)=>b.tokens-a.tokens,
+             prompts:(a,b)=>b.prompts-a.prompts};
+function fmtWhen(iso){
+  if(!iso) return '';
+  const d=new Date(iso);
+  return d.toLocaleDateString(undefined,{month:'short',day:'numeric'})+', '
+       + d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+}
+function fmtDur(a,b){
+  if(!a||!b) return '';
+  const ms=new Date(b)-new Date(a); if(ms<60000) return '<1m';
+  const m=Math.round(ms/60000); if(m<60) return m+'m';
+  return Math.floor(m/60)+'h '+(m%60)+'m';
+}
+function underPath(s,segs){
+  if(s.segs.length<segs.length) return false;
+  for(let i=0;i<segs.length;i++) if(s.segs[i]!==segs[i]) return false;
+  return true;
+}
+function renderDetail(path){
+  const segs=path? path.split('/').filter(Boolean):[];
+  const from=$('#from').value, to=$('#to').value;
+  let list=DATA.sessions.filter(s=>inWindow(s) && underPath(s,segs));
+  list=list.slice().sort(SORTS[sortBy]);
+
+  const totTok=list.reduce((a,s)=>a+s.tokens,0);
+  const totPr =list.reduce((a,s)=>a+s.prompts,0);
+  const logs=list.map(s=>s.tokens).filter(v=>v>0).map(v=>Math.log10(v+1));
+  const lo=logs.length?Math.min(...logs):0, hi=logs.length?Math.max(...logs):1;
+  const heatFor=v=>{const t=v<=0?0:(hi>lo?(Math.log10(v+1)-lo)/(hi-lo):1);const c=heatRGB(t);return `rgb(${c[0]},${c[1]},${c[2]})`;};
+
+  const name=segs.length?segs[segs.length-1]:'AI root';
+  const full=path?`${DATA.ai_root}/${path}`:DATA.ai_root;
+
+  const rows=list.map((s,i)=>{
+    const deep=s.segs.slice(segs.length).join('/');
+    const desc=s.desc||s.title||'';
+    const titleHtml = desc
+      ? `<div class="stitle" title="${esc(s.title||'')}">${esc(desc).replace(/\n/g,'<br>')}</div>`
+      : `<div class="stitle none">no description</div>`;
+    return `<div class="scard" style="animation-delay:${Math.min(i*8,240)}ms">
+      <div class="sheat" style="background:${heatFor(s.tokens)};box-shadow:0 0 10px ${heatFor(s.tokens)}66"></div>
+      <div class="smain">
+        ${titleHtml}
+        <div class="smeta">
+          <span>${fmtWhen(s.ts)}</span>
+          ${fmtDur(s.ts,s.end)?`<span>· ${fmtDur(s.ts,s.end)}</span>`:''}
+          ${deep?`<span class="badge">${esc(deep)}</span>`:''}
+          <span class="sid" data-id="${esc(s.session)}" title="${esc(s.file)}\nclick to copy: claude --resume ${esc(s.session)}">${esc(s.session.slice(0,8))}</span>
+        </div>
+      </div>
+      <div class="snums">
+        <div class="t">${fmtTok(s.tokens)}</div>
+        <div class="p">${s.prompts.toLocaleString()} prompts</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  $('#detail').innerHTML=
+    `<button class="back" id="back">← node map</button>
+     <div class="dhead"><h2>${esc(name)}</h2><span class="dpath">${esc(full)}</span></div>
+     <div class="dstats"><b>${list.length}</b> sessions · <b>${fmtTok(totTok)}</b> tokens · <b>${totPr.toLocaleString()}</b> prompts · ${from} → ${to}</div>
+     <div class="sorts">
+       ${['recent','tokens','prompts'].map(k=>`<button data-s="${k}" class="${k===sortBy?'on':''}">${k}</button>`).join('')}
+     </div>
+     <div class="slist">${rows||'<div class="empty">no sessions in this range</div>'}</div>`;
+
+  $('#back').onclick=()=>{ location.hash=''; };
+  $('#detail').querySelectorAll('.sorts button').forEach(b=>b.onclick=()=>{ sortBy=b.dataset.s; renderDetail(path); });
+  $('#detail').querySelectorAll('.sid').forEach(el=>el.onclick=()=>{
+    navigator.clipboard?.writeText('claude --resume '+el.dataset.id);
+    const o=el.textContent; el.textContent='copied'; setTimeout(()=>el.textContent=o,900);
+  });
+}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+// ---- router ---------------------------------------------------------------
+function route(){
+  const m=location.hash.match(/^#\/dir\/(.*)$/);
+  if(m){
+    $('#tree').hidden=true; $('#detail').hidden=false; $('#foot').hidden=true;
+    renderDetail(decodeURIComponent(m[1]));
+  }else{
+    $('#detail').hidden=true; $('#tree').hidden=false; $('#foot').hidden=false;
+    render();
+  }
+}
+window.addEventListener('hashchange',route);
+
+// ---- controls ------------------------------------------------------------
+$('#from').value=DATA.min_date; $('#to').value=DATA.max_date;
+$('#from').min=$('#to').min=DATA.min_date; $('#from').max=$('#to').max=DATA.max_date;
+$('#from').onchange=$('#to').onchange=()=>{ cutoffTs=null; route(); };  // manual edit clears sub-day window
+
+document.querySelectorAll('#metric button').forEach(b=>b.onclick=()=>{
+  if(b.dataset.m===metric) return;
+  document.querySelectorAll('#metric button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on'); metric=b.dataset.m;
+  // tree visible -> recolor in place so the 1.5s color shift animates;
+  // in detail view there's nothing metric-dependent to repaint.
+  if(!$('#tree').hidden) recolor(); else updateKey([]);
+});
+document.querySelectorAll('.pills button').forEach(b=>b.onclick=()=>{
+  cutoffTs=null;
+  if(b.dataset.hours){
+    // true N-hour window measured back from the most recent session timestamp
+    const hrs=+b.dataset.hours;
+    const latest=DATA.sessions.length? DATA.sessions[DATA.sessions.length-1].ts
+                                     : DATA.max_date+'T23:59:59Z';
+    const d=new Date(latest); d.setUTCHours(d.getUTCHours()-hrs);
+    cutoffTs=d.toISOString();
+    $('#from').value=cutoffTs.slice(0,10); $('#to').value=DATA.max_date;
+  }else if(b.dataset.days==='all'){ $('#from').value=DATA.min_date; $('#to').value=DATA.max_date; }
+  else{
+    const days=+b.dataset.days, end=DATA.max_date;
+    const d=new Date(end+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()-(days-1));
+    const start=d.toISOString().slice(0,10);
+    $('#from').value= start<DATA.min_date?DATA.min_date:start; $('#to').value=end;
+  }
+  route();
+});
+
+route();
+</script>
+</body>
+</html>
