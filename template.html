@@ -106,6 +106,15 @@
                background-color 1.5s ease, box-shadow 1.5s ease;
   }
   .chip:hover{transform:translateX(2px); filter:brightness(1.12)}
+  /* white-border flash on the tiles whose heat shifted most when toggling metric */
+  .chip.flash{ outline:2px solid rgba(255,255,255,0); outline-offset:1px;
+               animation:flashedge 1.5s ease both; }
+  @keyframes flashedge{
+    0%{ outline-color:rgba(255,255,255,0); box-shadow:0 0 0 rgba(255,255,255,0); }
+    18%{ outline-color:rgba(255,255,255,.95); }
+    40%{ outline-color:rgba(255,255,255,.55); }
+    100%{ outline-color:rgba(255,255,255,0); }
+  }
   .chip .dot{ /* leading session-count tick, faint */
     width:5px; height:5px; border-radius:50%; background:rgba(255,255,255,.55);
     box-shadow:0 0 6px rgba(255,255,255,.4); flex:0 0 auto;
@@ -199,6 +208,33 @@
   .snums .t{font-size:15px; font-weight:600; color:var(--ink)}
   .snums .p{font-size:11px; color:var(--muted); margin-top:3px}
 
+  /* ---------- kindling: limit-hit, unresumed sessions ---------- */
+  .kindle{
+    display:inline-flex; align-items:center; gap:7px; cursor:pointer;
+    background:linear-gradient(180deg,rgba(253,141,60,.16),rgba(230,85,13,.12));
+    color:var(--accent); border:1px solid rgba(253,141,60,.4); border-radius:999px;
+    padding:6px 13px; font-family:var(--mono); font-size:11.5px; letter-spacing:.4px;
+    transition:.15s;
+  }
+  .kindle:hover{border-color:var(--accent); box-shadow:0 0 16px rgba(253,141,60,.25)}
+  .kindle .ember{filter:saturate(1.2); animation:flicker 2.6s ease-in-out infinite}
+  .kindle .kcount{background:var(--accent); color:#160d04; font-weight:700;
+                  border-radius:999px; padding:0 7px; font-size:11px}
+  .kindle.empty{opacity:.5; filter:grayscale(.6)}
+  .kindle.empty .kcount{background:var(--faint); color:var(--bg0)}
+  @keyframes flicker{0%,100%{opacity:1}45%{opacity:.55}70%{opacity:.85}}
+
+  .kcard{border-color:rgba(253,141,60,.28) !important}
+  .kcard .sheat{background:linear-gradient(180deg,#fd8d3c,#e6550d) !important;
+                box-shadow:0 0 12px rgba(253,141,60,.5) !important}
+  .kreset{color:var(--accent); border:1px solid rgba(253,141,60,.45);
+          border-radius:5px; padding:0 6px}
+  .kdir{color:var(--ink); cursor:pointer; text-decoration:underline dotted var(--rail)}
+  .kdir:hover{color:var(--accent)}
+  .kresume{display:inline-flex; align-items:center; gap:6px; cursor:pointer;
+           color:var(--faint); transition:color .15s}
+  .kresume:hover{color:var(--accent)}
+
   ::-webkit-scrollbar{width:11px; height:11px}
   ::-webkit-scrollbar-thumb{background:var(--line); border-radius:6px; border:3px solid var(--bg0)}
   ::-webkit-scrollbar-thumb:hover{background:var(--rail)}
@@ -234,6 +270,9 @@
         <button data-m="prompts">user prompts</button>
       </div>
     </div>
+    <button class="kindle" id="kbtn" title="Sessions that hit the session limit and were never resumed">
+      <span class="ember">🔥</span> kindling <span class="kcount" id="kcount">0</span>
+    </button>
   </div>
 </header>
 
@@ -330,15 +369,36 @@ function updateKey(acc){
 
 let chipReg=[];   // {chip,node,isRoot} — kept so a metric toggle can recolor in place
 
+const valOf=(node,m)=> m==='tokens'? node.tok : node.prm;
+function flash(chip){
+  chip.classList.remove('flash'); void chip.offsetWidth;  // reflow -> restart anim
+  chip.classList.add('flash');
+  setTimeout(()=>chip.classList.remove('flash'),1550);
+}
+
 // Recolor existing tiles WITHOUT rebuilding the DOM. The layout stays put (it's
-// anchored to token spend), so only background/glow change — and the .chip CSS
-// transition animates that shift over 1.5s, per tile.
-function recolor(){
+// anchored to token spend), so only background/glow change — the .chip CSS
+// transition animates that shift over 1.5s, per tile. When toggling metrics we
+// also flash a white border on the tiles whose heat moved the MOST (top 15%).
+function recolor(prevMetric){
   if(!chipReg.length) return;
-  const acc=chipReg.filter(c=>!c.isRoot).map(c=>colorVal(c.node));
-  const norm=logNorm(acc);
-  for(const c of chipReg) applyHeat(c.chip,c.node,norm);
-  updateKey(acc);
+  const reg=chipReg.filter(c=>!c.isRoot);
+  const newNorm=logNorm(reg.map(c=>colorVal(c.node)));   // colorVal uses current metric
+
+  let deltas=null, thresh=Infinity;
+  if(prevMetric && prevMetric!==metric){
+    const oldNorm=logNorm(reg.map(c=>valOf(c.node,prevMetric)));
+    deltas=reg.map(c=>Math.abs(newNorm(valOf(c.node,metric)) - oldNorm(valOf(c.node,prevMetric))));
+    const sorted=[...deltas].sort((a,b)=>a-b);
+    thresh = sorted.length ? sorted[Math.floor(sorted.length*0.85)] : Infinity;  // 85th pct = top 15%
+  }
+
+  reg.forEach((c,i)=>{
+    applyHeat(c.chip,c.node,newNorm);
+    if(deltas && deltas[i]>0 && deltas[i]>=thresh) flash(c.chip);
+  });
+  chipReg.filter(c=>c.isRoot).forEach(c=>applyHeat(c.chip,c.node,newNorm)); // root: recolor, no flash
+  updateKey(reg.map(c=>colorVal(c.node)));
 }
 
 function render(){
@@ -474,18 +534,67 @@ function renderDetail(path){
 }
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
+// ---- kindling: sessions that hit the limit and were never resumed ---------
+const kindlingList=()=>DATA.sessions.filter(s=>s.limit && !s.resumed)
+  .sort((a,b)=>(a.ts||'').localeCompare(b.ts||''));   // oldest -> newest
+
+function renderKindling(){
+  const list=kindlingList();
+  const rows=list.map((s,i)=>{
+    const dir=s.segs.join('/')||'(AI root)';
+    const desc=s.desc||s.title||'';
+    const descHtml=desc
+      ? `<div class="stitle" title="${esc(s.title||'')}">${esc(desc).replace(/\n/g,'<br>')}</div>`
+      : `<div class="stitle none">no description</div>`;
+    return `<div class="scard kcard" style="animation-delay:${Math.min(i*9,260)}ms">
+      <div class="sheat"></div>
+      <div class="smain">
+        ${descHtml}
+        <div class="smeta">
+          <span>${fmtWhen(s.ts)}</span>
+          <span class="kdir" data-path="${esc(s.segs.join('/'))}">${esc(dir)}</span>
+          ${s.reset?`<span class="kreset">reset ${esc(s.reset)}</span>`:''}
+          <span class="kresume" data-id="${esc(s.session)}" title="copy: claude --resume ${esc(s.session)}">⟲ resume</span>
+        </div>
+      </div>
+      <div class="snums"><div class="p">${esc((fmtWhen(s.ts)||'').split(',')[0])}</div></div>
+    </div>`;
+  }).join('');
+  $('#detail').innerHTML=
+    `<button class="back" id="back">← node map</button>
+     <div class="dhead"><h2>🔥 Kindling</h2><span class="dpath">sessions that hit the session limit and were never resumed · oldest → newest</span></div>
+     <div class="dstats"><b>${list.length}</b> ${list.length===1?'session':'sessions'} waiting to be picked back up</div>
+     <div class="slist">${rows||'<div class="empty">nothing kindling — every limited session was resumed</div>'}</div>`;
+  $('#back').onclick=()=>{ location.hash=''; };
+  $('#detail').querySelectorAll('.kdir').forEach(el=>el.onclick=()=>{ location.hash='#/dir/'+encodeURIComponent(el.dataset.path); });
+  $('#detail').querySelectorAll('.kresume').forEach(el=>el.onclick=()=>{
+    navigator.clipboard?.writeText('claude --resume '+el.dataset.id);
+    const o=el.innerHTML; el.textContent='copied'; setTimeout(()=>el.innerHTML=o,1000);
+  });
+}
+
 // ---- router ---------------------------------------------------------------
 function route(){
-  const m=location.hash.match(/^#\/dir\/(.*)$/);
-  if(m){
+  const dirM=location.hash.match(/^#\/dir\/(.*)$/);
+  if(location.hash==='#/kindling'){
+    $('#tree').hidden=true; $('#detail').hidden=false; $('#foot').hidden=true; renderKindling();
+  }else if(dirM){
     $('#tree').hidden=true; $('#detail').hidden=false; $('#foot').hidden=true;
-    renderDetail(decodeURIComponent(m[1]));
+    renderDetail(decodeURIComponent(dirM[1]));
   }else{
     $('#detail').hidden=true; $('#tree').hidden=false; $('#foot').hidden=false;
     render();
   }
 }
 window.addEventListener('hashchange',route);
+
+// kindling button: badge count + navigation
+(function(){
+  const n=kindlingList().length;
+  $('#kcount').textContent=n;
+  $('#kbtn').classList.toggle('empty',n===0);
+  $('#kbtn').onclick=()=>{ location.hash='#/kindling'; };
+})();
 
 // ---- controls ------------------------------------------------------------
 $('#from').value=DATA.min_date; $('#to').value=DATA.max_date;
@@ -494,11 +603,12 @@ $('#from').onchange=$('#to').onchange=()=>{ cutoffTs=null; route(); };  // manua
 
 document.querySelectorAll('#metric button').forEach(b=>b.onclick=()=>{
   if(b.dataset.m===metric) return;
+  const prev=metric;
   document.querySelectorAll('#metric button').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); metric=b.dataset.m;
-  // tree visible -> recolor in place so the 1.5s color shift animates;
-  // in detail view there's nothing metric-dependent to repaint.
-  if(!$('#tree').hidden) recolor(); else updateKey([]);
+  // tree visible -> recolor in place so the 1.5s color shift animates, and flash
+  // a white border on the tiles whose heat moved most. detail view: nothing to do.
+  if(!$('#tree').hidden) recolor(prev); else updateKey([]);
 });
 document.querySelectorAll('.pills button').forEach(b=>b.onclick=()=>{
   cutoffTs=null;

@@ -4,6 +4,7 @@ data.json
 digests.json
 summaries.json
 session_heatmap.html
+scan_cache.json
 
 # Subagent summarization scratch (partial {id: desc} files, merged into summaries.json)
 parts/

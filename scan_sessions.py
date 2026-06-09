@@ -24,6 +24,7 @@ HERE = Path(__file__).resolve().parent
 OUT = HERE / "data.json"
 DIGESTS = HERE / "digests.json"      # per-session gist -> input for summarize.py / subagents
 SUMMARIES = HERE / "summaries.json"  # session_id -> LLM 3-line description (cache)
+CACHE = HERE / "scan_cache.json"     # file -> {mtime,size,rec}: skip re-parsing unchanged logs
 TEMPLATE = HERE / "template.html"
 PAGE = HERE / "session_heatmap.html"
 
@@ -121,6 +122,9 @@ def scan_file(path: Path):
     final_asst = ""         # text of the most recent assistant message
     tools = set()
     seen = False
+    limit_seen = False      # session hit the Claude session limit
+    limit_reset = None      # the "resets <time>" string from the limit message
+    events_after = None     # meaningful events since the last limit marker (None=no marker yet)
     with path.open(encoding="utf-8", errors="replace") as fh:
         for line in fh:
             line = line.strip()
@@ -139,6 +143,7 @@ def scan_file(path: Path):
                     first_ts = ts
                 if last_ts is None or ts > last_ts:
                     last_ts = ts
+            is_marker = False
             if d.get("type") == "assistant":
                 msg = d.get("message") or {}
                 tokens += sum_usage(msg.get("usage"))
@@ -146,6 +151,17 @@ def scan_file(path: Path):
                 tools.update(atools)
                 if atxt:
                     final_asst = atxt
+                # genuine session-limit hit (distinct from prompt-too-long / not-logged-in)
+                if d.get("isApiErrorMessage") and "session limit" in atxt.lower():
+                    is_marker = True
+                    limit_seen = True
+                    mm = re.search(r"resets\s+([^\n]+)", atxt)
+                    limit_reset = mm.group(1).strip() if mm else atxt.strip()
+                    events_after = 0
+            # count real activity AFTER a limit marker -> was the session resumed?
+            if (not is_marker and events_after is not None
+                    and d.get("type") in ("user", "assistant") and not d.get("isMeta")):
+                events_after += 1
             pt = prompt_text(d)
             if pt is not None:
                 prompts += 1
@@ -165,7 +181,9 @@ def scan_file(path: Path):
     }
     return {"cwd": cwd, "ts": first_ts, "end": last_ts, "tokens": tokens,
             "prompts": prompts, "title": title, "session": path.stem,
-            "file": str(path).replace("\\", "/"), "digest": digest}
+            "file": str(path).replace("\\", "/"), "digest": digest,
+            "limit": limit_seen, "reset": limit_reset,
+            "resumed": bool((events_after or 0) > 0) if limit_seen else False}
 
 
 def main():
@@ -173,25 +191,50 @@ def main():
         print(f"No projects dir at {PROJECTS_DIR}", file=sys.stderr)
         sys.exit(1)
 
+    # --- scan cache: skip re-parsing files whose (mtime,size) are unchanged.
+    # This is the persistent table that minimizes future scan time: only new or
+    # appended (e.g. resumed) session files get re-read. Stores the raw scan_file
+    # record; per-run derivations (date/segs) are recomputed cheaply below.
+    cache = {}
+    if CACHE.exists():
+        try:
+            cache = json.loads(CACHE.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            cache = {}
+    new_cache = {}
+    reused = parsed = 0
+
     sessions = []
     skipped = 0
     for jf in PROJECTS_DIR.glob("*/*.jsonl"):
-        rec = scan_file(jf)
+        key = str(jf)
+        try:
+            st = jf.stat()
+        except OSError:
+            continue
+        ent = cache.get(key)
+        if ent and ent.get("mtime") == st.st_mtime and ent.get("size") == st.st_size:
+            rec = ent.get("rec"); reused += 1
+        else:
+            rec = scan_file(jf); parsed += 1
+        new_cache[key] = {"mtime": st.st_mtime, "size": st.st_size, "rec": rec}
+
         if rec is None:
             skipped += 1
             continue
         if not norm(rec["cwd"]).startswith(AI_ROOT_NORM):
             continue
-        if not rec["ts"]:
+        if not rec.get("ts"):
             continue
+        rec = dict(rec)  # copy before adding per-run fields (don't mutate cache)
         rec["date"] = rec["ts"][:10]  # YYYY-MM-DD
-        # store path relative to AI root, as forward-slash segments
         rel = norm(rec["cwd"])[len(AI_ROOT_NORM):].strip("/")
-        rec["rel"] = rec["cwd"].replace("\\", "/").rstrip("/")  # full for display
         rec["segs"] = [s for s in rel.split("/") if s] if rel else []
         sessions.append(rec)
 
+    CACHE.write_text(json.dumps(new_cache), encoding="utf-8")
     sessions.sort(key=lambda r: r["ts"])
+    kindling = [s for s in sessions if s.get("limit") and not s.get("resumed")]
 
     # --- digests (summarizer input), keyed by session id ---
     digests = {
@@ -224,16 +267,20 @@ def main():
             {"segs": s["segs"], "date": s["date"], "ts": s["ts"], "end": s["end"],
              "tokens": s["tokens"], "prompts": s["prompts"],
              "title": s["title"], "session": s["session"], "file": s["file"],
-             "desc": summaries.get(s["session"])}
+             "desc": summaries.get(s["session"]),
+             "limit": s.get("limit", False), "reset": s.get("reset"),
+             "resumed": s.get("resumed", False)}
             for s in sessions
         ],
     }
     data_str = json.dumps(payload, indent=None)
     OUT.write_text(data_str, encoding="utf-8")
     print(f"Sessions kept: {len(sessions)}  skipped(no cwd/empty): {skipped}")
+    print(f"Scan cache: {reused} reused, {parsed} parsed")
     print(f"Date range: {payload['min_date']} -> {payload['max_date']}")
     print(f"Descriptions: {have}/{len(sessions)} present "
           f"({len(sessions) - have} need summarize.py / subagent pass)")
+    print(f"Kindling (limit-hit, unresumed): {len(kindling)}")
     print(f"Wrote {OUT} and {DIGESTS}")
 
     # Embed data into the template -> single self-contained, double-clickable page.
