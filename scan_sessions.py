@@ -173,6 +173,7 @@ def scan_file(path: Path):
     final_asst = ""         # text of the most recent assistant message
     tools = set()
     seen = False
+    entry = None            # 'cli' = human-typed session, 'sdk-cli' = subagent-spawned
     limit_seen = False      # session hit the Claude session limit
     limit_reset = None      # the "resets <time>" string from the limit message
     events_after = None     # meaningful events since the last limit marker (None=no marker yet)
@@ -190,6 +191,8 @@ def scan_file(path: Path):
                 continue
             seen = True
             typ = d.get("type")
+            if entry is None and d.get("entrypoint"):
+                entry = d["entrypoint"]
             if cwd is None and d.get("cwd"):
                 cwd = d["cwd"]
             ts = d.get("timestamp")
@@ -262,6 +265,7 @@ def scan_file(path: Path):
         elif open_tools:
             wreason = "interrupted"
     return {"cwd": cwd, "ts": first_ts, "end": last_ts, "tokens": tokens,
+            "entry": entry,
             "prompts": prompts, "title": title, "session": path.stem,
             "file": str(path).replace("\\", "/"), "digest": digest,
             "limit": limit_seen, "reset": limit_reset,
@@ -269,7 +273,7 @@ def scan_file(path: Path):
             "waiting": wreason is not None, "wreason": wreason}
 
 
-CACHE_VERSION = 3  # bump when scan_file's record schema changes (auto-invalidates cache)
+CACHE_VERSION = 4  # bump when scan_file's record schema changes (auto-invalidates cache)
 
 
 def collect_records():
@@ -312,6 +316,9 @@ def main():
     ap.add_argument("--list-roots", action="store_true", help="show configured working dirs and exit")
     ap.add_argument("--add-root", action="append", metavar="DIR", help="add a working dir to include")
     ap.add_argument("--remove-root", action="append", metavar="DIR", help="stop including a working dir")
+    ap.add_argument("--include-subagents", action="store_true",
+                    help="open the viewer with subagent/SDK-spawned sessions shown "
+                         "(they always ship in the data; this just sets the toggle's default)")
     args = ap.parse_args()
 
     if not PROJECTS_DIR.exists():
@@ -362,6 +369,9 @@ def main():
         if not match or not rec.get("ts"):
             continue
         rec = dict(rec)  # copy before adding per-run fields (don't mutate cache)
+        # subagent/SDK-spawned sessions are tagged, not dropped: the viewer hides
+        # them by default and offers a show/hide toggle.
+        rec["agent"] = (rec.get("entry") == "sdk-cli")
         rec["date"] = rec["ts"][:10]
         rel = cwdn[len(norm(match)):].strip("/")
         sub = [s for s in rel.split("/") if s] if rel else []
@@ -369,8 +379,11 @@ def main():
         sessions.append(rec)
 
     sessions.sort(key=lambda r: r["ts"])
+    n_agents = sum(1 for s in sessions if s.get("agent"))
+    # headline kindling count reflects the viewer's default (subagents hidden)
     kindling = [s for s in sessions
-                if (s.get("limit") and not s.get("resumed")) or s.get("waiting")]
+                if not s.get("agent")
+                and ((s.get("limit") and not s.get("resumed")) or s.get("waiting"))]
 
     # --- digests (summarizer input), keyed by session id ---
     digests = {
@@ -398,6 +411,8 @@ def main():
         "root_paths": {labels[r]: r.replace("\\", "/") for r in roots},
         "generated_from": str(PROJECTS_DIR).replace("\\", "/"),
         "count": len(sessions),
+        "agent_count": n_agents,                       # subagent/SDK-spawned sessions present
+        "show_subagents": bool(args.include_subagents),  # initial state of the viewer's toggle
         "min_date": dates[0] if dates else None,
         "max_date": dates[-1] if dates else None,
         "sessions": [
@@ -405,6 +420,7 @@ def main():
              "tokens": s["tokens"], "prompts": s["prompts"],
              "title": s["title"], "session": s["session"], "file": s["file"],
              "desc": summaries.get(s["session"]),
+             "agent": s.get("agent", False),
              "limit": s.get("limit", False), "reset": s.get("reset"),
              "resumed": s.get("resumed", False), "waiting": s.get("waiting", False),
              "wreason": s.get("wreason"), "assay": assay.get(s["session"])}
@@ -414,7 +430,9 @@ def main():
     data_str = json.dumps(payload, indent=None)
     OUT.write_text(data_str, encoding="utf-8")
     print(f"Roots: {', '.join(labels[r] for r in roots)}")
-    print(f"Sessions kept: {len(sessions)}  skipped(no cwd/empty): {skipped}")
+    print(f"Sessions kept: {len(sessions)}  skipped(no cwd/empty): {skipped}  "
+          f"of which subagents: {n_agents} "
+          f"(viewer default: {'shown' if args.include_subagents else 'hidden'}, toggle in UI)")
     print(f"Scan cache: {reused} reused, {parsed} parsed")
     print(f"Date range: {payload['min_date']} -> {payload['max_date']}")
     print(f"Descriptions: {have}/{len(sessions)} present "

@@ -301,6 +301,13 @@
         <button data-m="prompts">user prompts</button>
       </div>
     </div>
+    <div class="grp">
+      <span class="cap">Subagents</span>
+      <div class="seg" id="agents" title="Show or hide subagent / SDK-spawned sessions (the work your sessions fan out, not what you typed)">
+        <button data-a="hide" class="on">hide</button>
+        <button data-a="show">show <span id="acount"></span></button>
+      </div>
+    </div>
     <button class="kindle" id="kbtn" title="Sessions that hit the session limit and were never resumed">
       <span class="ember">🔥</span> kindling <span class="kcount" id="kcount">0</span>
     </button>
@@ -338,11 +345,18 @@ $('#adddir').onclick=()=>{
   navigator.clipboard?.writeText(cmd);
   alert('Copied this command — run it in the Development-Heatmap folder, then reload the page:\n\n'+cmd);
 };
-$('#src').textContent = `source: ${DATA.count} sessions · ${DATA.min_date} → ${DATA.max_date}`;
+$('#src').textContent = `source: ${DATA.count} sessions`
+  + (DATA.agent_count ? ` (${DATA.count-DATA.agent_count} typed · ${DATA.agent_count} subagent)` : '')
+  + ` · ${DATA.min_date} → ${DATA.max_date}`;
 
 let metric = 'tokens';
 const collapsed = new Set();
 let cutoffTs = null;   // sub-day window (e.g. 36h): exact ISO cutoff, else null
+let showAgents = !!DATA.show_subagents;  // include subagent/SDK-spawned sessions?
+
+// subagent gate — applied everywhere sessions are consumed (tree, detail, kindling)
+// so the toggle is consistent across all views. Default hides s.agent sessions.
+function visible(s){ return showAgents || !s.agent; }
 
 // shared window test — day-granular From/To inputs PLUS an optional precise cutoff
 function inWindow(s){
@@ -440,7 +454,7 @@ function recolor(prevMetric){
 }
 
 function render(){
-  const sessions=DATA.sessions.filter(inWindow);
+  const sessions=DATA.sessions.filter(s=>visible(s)&&inWindow(s));
   const tree=buildTree(sessions);
 
   const acc=[]; collect(tree,acc,true);
@@ -518,7 +532,7 @@ function underPath(s,segs){
 function renderDetail(path){
   const segs=path? path.split('/').filter(Boolean):[];
   const from=$('#from').value, to=$('#to').value;
-  let list=DATA.sessions.filter(s=>inWindow(s) && underPath(s,segs));
+  let list=DATA.sessions.filter(s=>visible(s) && inWindow(s) && underPath(s,segs));
   list=list.slice().sort(SORTS[sortBy]);
 
   const totTok=list.reduce((a,s)=>a+s.tokens,0);
@@ -579,13 +593,13 @@ function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','
 // rank by usefulness (obsolete sinks to the bottom), then oldest -> newest
 const kRank=s=>{const v=s.assay&&s.assay.verdict; return v==='useful'?0 : v==='obsolete'?2 : 1;};
 const kindlingList=()=>DATA.sessions
-  .filter(s=>(s.limit && !s.resumed) || s.waiting)
+  .filter(s=>visible(s) && ((s.limit && !s.resumed) || s.waiting))
   .sort((a,b)=> kRank(a)-kRank(b) || (a.ts||'').localeCompare(b.ts||''));
 
 // newer sessions in the SAME directory -> the abandoned one may be superseded
 function newerInDir(s){
   const key=s.segs.join('/');
-  return DATA.sessions.filter(x=>x.segs.join('/')===key && (x.ts||'')>(s.ts||'')).length;
+  return DATA.sessions.filter(x=>visible(x) && x.segs.join('/')===key && (x.ts||'')>(s.ts||'')).length;
 }
 
 function renderKindling(){
@@ -660,13 +674,14 @@ function route(){
 }
 window.addEventListener('hashchange',route);
 
-// kindling button: badge count + navigation
-(function(){
+// kindling button: badge count (recomputed on subagent toggle) + navigation
+function kbadge(){
   const n=kindlingList().length;
   $('#kcount').textContent=n;
   $('#kbtn').classList.toggle('empty',n===0);
-  $('#kbtn').onclick=()=>{ location.hash='#/kindling'; };
-})();
+}
+$('#kbtn').onclick=()=>{ location.hash='#/kindling'; };
+kbadge();
 
 // ---- controls ------------------------------------------------------------
 $('#from').value=DATA.min_date; $('#to').value=DATA.max_date;
@@ -682,6 +697,21 @@ document.querySelectorAll('#metric button').forEach(b=>b.onclick=()=>{
   // a white border on the tiles whose heat moved most. detail view: nothing to do.
   if(!$('#tree').hidden) recolor(prev); else updateKey([]);
 });
+
+// subagent show/hide — refilters every view (tree/detail/kindling) + the badge.
+$('#acount').textContent = DATA.agent_count ? `(${DATA.agent_count})` : '';
+document.querySelectorAll('#agents button').forEach(x=>
+  x.classList.toggle('on',(x.dataset.a==='show')===showAgents));  // reflect initial default
+document.querySelectorAll('#agents button').forEach(b=>b.onclick=()=>{
+  const want=b.dataset.a==='show';
+  if(want===showAgents) return;
+  showAgents=want;
+  document.querySelectorAll('#agents button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+  kbadge();   // kindling count depends on visibility
+  route();    // re-render whatever view is active
+});
+
 document.querySelectorAll('.pills button').forEach(b=>b.onclick=()=>{
   cutoffTs=null;
   if(b.dataset.hours){
